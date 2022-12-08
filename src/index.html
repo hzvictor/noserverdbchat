@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Socket.IO chat</title>
+    <style>
+        body {
+            margin: 0;
+            padding-bottom: 3rem;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        .form {
+            background: rgba(0, 0, 0, 0.15);
+            padding: 0.25rem;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            display: flex;
+            height: 3rem;
+            box-sizing: border-box;
+            backdrop-filter: blur(10px);
+        }
+
+        #input {
+            border: none;
+            padding: 0 1rem;
+            flex-grow: 1;
+            border-radius: 2rem;
+            margin: 0.25rem;
+        }
+
+        #input:focus {
+            outline: none;
+        }
+
+        .form>button {
+            background: #333;
+            border: none;
+            padding: 0 1rem;
+            margin: 0.25rem;
+            border-radius: 3px;
+            outline: none;
+            color: #fff;
+        }
+
+        #messages {
+            list-style-type: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        #messages>li {
+            padding: 0.5rem 1rem;
+            border-bottom: 1px solid #eeeeee;
+        }
+
+        .chatItem {
+            display: flex;
+        }
+
+        .content {
+            margin-left: 10px;
+        }
+
+        .name {
+            text-align: center;
+            font-size: 24px;
+        }
+
+        .date {
+            padding-right: 10px;
+            line-height: 28px;
+        }
+
+        .delete {
+            width: 30px;
+            height: 30px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <div class="name">Your name: {{name}}</div>
+        <ul id="messages">
+            <li class="chatItem" v-for="(item,index) in chatDate" :key="item.time">
+                <div class="date">{{item.date}}</div>
+                <div class="name">{{item.name}}:</div>
+                <div class="content">{{item.content}}</div>
+                <img @click="deleteChatItem(item.id,item.name)" v-if="name == item.name" class="delete"
+                    src="https://s3.uuu.ovh/imgs/2022/11/21/ae7065534b3ffca4.png" alt="">
+            </li>
+
+        </ul>
+        <div class="form">
+            <input id="input" v-model="inputValue" autocomplete="off" /><button @click="sumitInput">Send</button>
+        </div>
+    </div>
+
+
+    <script src="https://npmcdn.com/dexie@3.2.2/dist/dexie.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vue@2/dist/vue.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.3/socket.io.min.js"></script>
+    <script>
+        var socket = io();
+        var db = new Dexie("MyDatabase");
+        db.version(1).stores({
+            tasks: '++id, name, content, time, date'
+        });
+        var app = new Vue({
+            el: '#app',
+            data: {
+                name: '',
+                chatDate: [],
+                inputValue: ''
+            },
+
+            created: function () {
+                // `this` 指向 vm 实例
+                console.log('this 指向 vm 实例')
+
+                openIDB = async () => {
+                    const allTask = await db.tasks.where('id').above(0).toArray()
+                    console.log('查询所有的数据')
+                    console.log()
+                    // send myself‘s chat info
+
+                    if (allTask.length > 0) {
+                        socket.emit('user in', JSON.stringify(allTask));
+                    }
+
+                    var newChatDate = this.chatDate.concat(allTask)
+                    this.chatDate = newChatDate.sort((a, b) => a.time - b.time)
+                }
+                openIDB()
+
+
+
+                let name = localStorage.getItem('name');
+                if (name) {
+                    this.name = name
+                } else {
+                    socket.emit('new name', (msg) => { })
+                    socket.on('new name', (msg) => {
+                        console.log("myname", msg)
+                        localStorage.setItem('name', msg);
+                        this.name = msg
+                    })
+                }
+
+                socket.on('delete msg', (msg) => {
+                    var deleteData = JSON.parse(msg)
+                    console.log(deleteData, 7777)
+                    if (this.name == deleteData[1]) {
+                        return
+                    } else {
+                        this.chatDate = this.chatDate.filter((item, index) => { return !(item.id == deleteData[0] && item.name == deleteData[1]) })
+                    }
+                });
+
+
+                socket.on('chat message', (msg) => {
+                    this.chatDate.push(JSON.parse(msg))
+                    window.scrollTo(0, document.body.scrollHeight);
+                });
+
+
+                socket.on('user in', (msg) => {
+                    var chatInfo = JSON.parse(msg)
+                    console.log('user in', chatInfo)
+
+
+
+                    postAlldata = async () => {
+                        const allTask = await db.tasks.where('id').above(0).toArray()
+                        socket.emit('other info', JSON.stringify(allTask));
+                    }
+                    postAlldata()
+
+                    if (chatInfo[0].name == this.name) {
+                        return
+                    } else {
+                        // judge if  the data arleady exists  Determine whether the data already exists
+                        // add other chat info  to chatbox
+
+                        let res = this.chatDate.some(item => { return (item.id == chatInfo[0].id && item.name == chatInfo[0].name) })
+                        if (res) {
+                            return
+                        }
+                        var newChatDate = this.chatDate.concat(chatInfo)
+                        this.chatDate = newChatDate.sort((a, b) => a.time - b.time)
+                    }
+                });
+
+                socket.on('other info', (msg) => {
+                    var chatInfo = JSON.parse(msg)
+                    if (chatInfo[0].name == this.name) {
+                        return
+                    }
+                    let res = this.chatDate.some(item => { return (item.id == chatInfo[0].id && item.name == chatInfo[0].name) })
+                    console.log(res, 77777777777)
+                    if (res) {
+                        return
+                    }
+                    var newChatDate = this.chatDate.concat(chatInfo)
+                    this.chatDate = newChatDate.sort((a, b) => a.time - b.time)
+                })
+
+
+            },
+
+            methods: {
+                sumitInput: async function () {
+                    var myDate = new Date();
+                    var id = await db.tasks.add({
+                        name: this.name,
+                        content: this.inputValue,
+                        time: Date.parse(new Date()),
+                        date: myDate.toLocaleString()
+                    })
+                    var chatContent = {
+                        id: id,
+                        name: this.name,
+                        content: this.inputValue,
+                        time: Date.parse(new Date()),
+                        date: myDate.toLocaleString()
+                    }
+                    socket.emit('chat message', JSON.stringify(chatContent));
+
+                    this.inputValue = '';
+                },
+                deleteChatItem: function (id, name) {
+                    this.chatDate = this.chatDate.filter((item, index) => { return item.id != id })
+                    socket.emit('delete msg', JSON.stringify([id, name]));
+                    db.tasks.where('id').equals(id).delete();
+
+                }
+            }
+        })
+    </script>
+
+    <script>
+
+
+
+    </script>
+</body>
+
+</html>
